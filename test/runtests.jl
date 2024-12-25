@@ -1,6 +1,8 @@
 using Buchi
 using Test
 
-@testset "Buchi.jl" begin
-    # Write your tests here.
-end
+include("helpers.jl")
+include("words.jl")
+include("cbuchi.jl")
+include("spot.jl")
+include("examples.jl")
