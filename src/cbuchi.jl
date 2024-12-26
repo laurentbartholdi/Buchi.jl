@@ -6,10 +6,8 @@ The states are of type `Ti<:Int`, and `A` is an alphabet, typically tuples.
 struct CBuchiAutomaton{Ti,Ta} <: BuchiAutomaton{Ta}
     x::VectorVector{Ti,Pair{Ta,Ti}} # the transitions
 
-    function CBuchiAutomaton{Ti,Ta}(n::Integer = 1; kwargs...) where {Ti,Ta}
-        A = new(VectorVector{Ti,Pair{Ta,Ti}}())
-        resize!(A,n)
-        A
+    function CBuchiAutomaton{Ti,Ta}() where {Ti,Ta}
+        new(VectorVector{Ti,Pair{Ta,Ti}}())
     end
 
     CBuchiAutomaton{Ti,Ta}(data; kwargs...) where {Ti,Ta} = CBuchiAutomaton{Ti,Ta}(1, data; kwargs...)
@@ -93,6 +91,7 @@ CBuchiAutomaton(n::Integer, data::Vector{Pair{Ti,Pair{Ta,Ti}}}; kwargs...) where
 CBuchiAutomaton(head::Pair,tail...; kwargs...) = CBuchiAutomaton(0,[head;tail...]; kwargs...)
 
 function __unreachables_scan(A,s,unseen)
+    s>nstates(A) && return # this is a hanging edge, it will disappear as deadend
     if unseen[s]
         unseen[s] = false
         for (_,t)=A[s]
@@ -119,9 +118,18 @@ function remove_deadends!(A::CBuchiAutomaton{Ti,Ta}) where {Ti,Ta}
     # reverse lookup
     from = VectorVector{Ti}(t=>s for (s,(_,t))=A[])
 
-    activity = [length(A[s]) for s=states(A)]
+    looseedges = false  # first delete all edges pointing to an inexistant state
+    for s=1:nstates(A), i=1:length(A[s])
+        if A[s][i].second>nstates(A)
+            A[s][i] = A[s][i].first=>0
+            looseedges = true
+        end
+    end
+
+    activity = [count(p->p.second≠0,A[s]) for s=states(A)]
     queue = filter(s->activity[s]==0, states(A))
     dead = falses(nstates(A))
+
     idle = true
     while !isempty(queue)
         t = pop!(queue)
@@ -140,7 +148,10 @@ function remove_deadends!(A::CBuchiAutomaton{Ti,Ta}) where {Ti,Ta}
             end
         end
     end
-    
+
+    if any(dead) || looseedges
+        delete!(A.x[],pair->pair.second==0)
+    end        
     if any(dead)
         newstate = Ti[] # get new state numbers
         t = 1
@@ -152,7 +163,6 @@ function remove_deadends!(A::CBuchiAutomaton{Ti,Ta}) where {Ti,Ta}
                 t += 1
             end
         end
-        delete!(A.x[],pair->pair.second==0)
         for i=1:length(A.x.A) #! don't peek in the structure!
             A.x.A[i] = A.x.A[i].first=>newstate[A.x.A[i].second]
         end
