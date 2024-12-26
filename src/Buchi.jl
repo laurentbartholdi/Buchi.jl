@@ -14,8 +14,6 @@ get_path() = joinpath(@__DIR__,"../deps/lib","libspot_buchi.$(Libdl.dlext)")
 
 function __init__()
     @initcxx
-
-    const Spot.bdd_dict = make_bdd_dict()
 end
 
 end
