@@ -97,18 +97,11 @@ letterstring(A,a::Spot.BDD) = Spot.string_psl(a,bdd_dict(A.d))
 
 # tuple dictionary, if the objects are tuples. This gives access to
 # maps between alphabets given by imbedding as a coordinate / projecting.
-struct Recoder{Ta}
-    m::Int
-    n::Int
-    map::Vector{UInt32}
-end
-Base.show(io::IO, recoder::Recoder) = print(io, "Recoder($(recoder.m) → $(recoder.n)…)")
-
 struct APDictFactory{Ta}
     d0::PlainAPDict{Ta}
     d::Vector{PlainAPDict} # one plain dictionary for each arity of tuples
     bdd::Dict{Tuple{Ta,Int},Spot.BDD} # BDDs for individual variables
-    recoders::Dict{Tuple{Int,Vector{Int}},Recoder{Ta}} # cache
+    recoders::Dict{Tuple{Int,Vector{Int}},Vector{UInt32}} # cache
 end
 Base.show(io::IO, factory::APDictFactory) = print(io,"APDictFactory(",length(factory.d),",",keys(factory.d0.s2i),")")
 
@@ -119,7 +112,7 @@ alltuples(n,vars) = n==0 ? [()] : [(a...,v) for a=alltuples(n-1,vars) for v=vars
 A "factory" is a holder for dictionaries over tuples of `Ta`. It supplies methods
 * `getindex(::APDictFactory,n::Int)` to produce a dictionary on n-tuples
 * `getindex(::APDictFactory)` to produce a dictionary on elements of `Ta`
-* `view(::APDictFactory,m::Int,inds::Vector{Int})` to produce a function mapping automata on m-tuples into automata on length(inds)-tuples
+!!!* `view(::APDictFactory,m::Int,inds::Vector{Int})` to produce a function mapping automata on m-tuples into automata on length(inds)-tuples
 """
 
 function APDictFactory(n::Int,vars::AbstractVector{Ta}) where Ta
@@ -196,31 +189,6 @@ get_factory(d::HillyAPDict) = d.factory
 Base.getindex(factory::APDictFactory{Ta},n::Integer) where Ta = TupleAPDict{n,Ta}(factory.d[n],factory)
 Base.getindex(factory::APDictFactory{Ta}) where Ta = HillyAPDict{Ta}(factory.d0,factory)
 
-"""view(APDictFactory,m::Int,inds::Vector{Int})::Vector{UInt32}
-
-Construct a map from one tuple dictionary to another, in the form of a correspondence between BDD variables by their id.
-
-For example, `view(factory,3,[1,3])` will produce the mapping of BDDs relating the tuple `(:x,:y,:z)` to `(:x,:z)`; while `view(factory,1,[0,1,0,1])` will produce an AP dictionary relating the tuple `(:x,)` to `(Any,:x,Any,:x)`.
-"""          
-function Base.view(factory::APDictFactory{Ta},m::Int,inds::AbstractVector{Int}) where Ta
-    get!(factory.recoders,(m,inds)) do
-        n = length(inds)
-        @assert all(i->0≤i≤m,inds)
-
-        result = UInt32[]
-
-        for (t,v)=factory.d[m].s2i
-            u = reduce(&, factory.bdd[t[inds[i]],i] for i=1:n if inds[i]≠0)
-
-            iv = Spot.id(v)
-            while length(result)≤iv push!(result,~UInt32(0)) end
-            result[1+iv] = Spot.id(u)
-        end
-
-        Recoder{Ta}(m,n,result)
-    end
-end
-
 ################################################################
 
 export SpotOmegaWord, rawword
@@ -271,7 +239,7 @@ rawword(w::SpotOmegaWord) = SpotOmegaWord(APDict(get_aut(w.d)),w.x)
 
 export SpotAutomaton, AcceptBuchi, AcceptCoBuchi
 export split_edges, canonicalize, postprocessor, rawautomaton
-export leftone, rightone, intersecting_word, simplify
+export leftone, rightone, intersecting_word, simplify, project
 
 abstract type Acceptance end
 struct AcceptBuchi <: Acceptance n::Int end
@@ -447,30 +415,50 @@ Split all edges of the automaton `A` into minimal Boolean expressions (maximal c
 """
 split_edges(g::SpotAutomaton) = SpotAutomaton(g.d,Spot.split_edges(g.x))
 
-__recoder_dict(factory,n,strip) = strip ? (n==1 ? factory[] : error("n > 1")) : factory[n]
-function (recoder::Recoder{Ta})(w::SpotOmegaWord{NTuple{N,Ta}};strip=false) where {Ta, N}
-    factory = get_factory(w.d)
-    @assert N==recoder.m
-    newdict = __recoder_dict(factory,recoder.n,strip)
-    SpotOmegaWord(newdict,Spot.recode_word(w.x,recoder.map))
-end
-function (recoder::Recoder{Ta})(w::SpotOmegaWord{Ta};strip=false) where Ta
-    factory = get_factory(w.d)
-    @assert 1==recoder.m
-    newdict = __recoder_dict(factory,recoder.n,strip)
-    SpotOmegaWord(newdict,Spot.recode_aut(w.x,recoder.map))
-end
-function (recoder::Recoder{Ta})(A::SpotAutomaton{NTuple{N,Ta}};strip=false) where {Ta, N}
+"""project(A::SpotOmegaWord,inds::Union{Int,Vector{Int}})
+project(A::SpotAutomaton,inds::Union{Int,Vector{Int}})
+
+Project the word or automaton by a letter-to-letter map on tuples, specified by `inds`.
+
+For example, if `A` has alphabet `NTuples{3,Ta}`, then `project(A,[1,3])` will map the tuple `(:x,:y,:z)` to `(:x,:z)` and `project(A,2)` will map  `(:x,:y,:z)` to `:y`; while if `A` has alphabet `Ta` or `Tuple{Ta}`, then `project(A,[0,1,0,1])` map `:x`, respectively `(:x,)`, to `(Any,:x,Any,:x)`.
+"""          
+project(A::SpotOmegaWord, inds::Integer) = __project_word(A,1,[inds],true)
+project(A::SpotOmegaWord, inds::AbstractVector{T}) where T <: Integer = __project_word(A,1,inds,false)
+project(A::SpotOmegaWord{NTuple{M,Ta}}, inds::Integer) where {Ta,M} = __project_word(A,M,[inds],true)
+project(A::SpotOmegaWord{NTuple{M,Ta}}, inds::AbstractVector{T}) where {Ta,M,T <: Integer} = __project_word(A,M,inds,false)
+project(A::SpotAutomaton, inds::Integer) = __project_aut(A,1,[inds],true)
+project(A::SpotAutomaton, inds::AbstractVector{T}) where T <: Integer = __project_aut(A,1,inds,false)
+project(A::SpotAutomaton{NTuple{M,Ta}}, inds::Integer) where {Ta,M} = __project_aut(A,M,[inds],true)
+project(A::SpotAutomaton{NTuple{M,Ta}}, inds::AbstractVector{T}) where {Ta,M,T <: Integer} = __project_aut(A,M,inds,false)
+
+function __recoder_dict(A,m,inds,strip)
+    n = length(inds)
     factory = get_factory(A.d)
-    @assert N==recoder.m
-    newdict = __recoder_dict(factory,recoder.n,strip)
-    SpotAutomaton(newdict,Spot.recode_aut(A.x,get_aut(newdict),recoder.map))
+    recoder = get!(factory.recoders,(m,inds)) do
+        @assert all(i->0≤i≤m,inds)
+
+        result = UInt32[]
+
+        for (t,v)=factory.d[m].s2i
+            u = reduce(&, factory.bdd[t[inds[i]],i] for i=1:n if inds[i]≠0)
+
+            iv = Spot.id(v)
+            while length(result)≤iv push!(result,~UInt32(0)) end
+            result[1+iv] = Spot.id(u)
+        end
+        result
+    end
+    (recoder,strip ? (n==1 ? factory[] : error("n > 1")) : factory[n])
 end
-function (recoder::Recoder{Ta})(A::SpotAutomaton{Ta};strip=false) where Ta
-    factory = get_factory(A.d)
-    @assert 1==recoder.m
-    newdict = __recoder_dict(factory,recoder.n,strip)
-    SpotAutomaton(newdict,Spot.recode_aut(A.x,get_aut(newdict),recoder.map))
+
+function __project_word(A::SpotOmegaWord,m,inds,strip)
+    recoder, newdict = __recoder_dict(A,m,inds,strip)
+    SpotOmegaWord(newdict,Spot.recode_word(A.x,recoder))
+end
+
+function __project_aut(A::SpotAutomaton,m,inds,strip)
+    recoder, newdict = __recoder_dict(A,m,inds,strip)
+    SpotAutomaton(newdict,Spot.recode_aut(A.x,get_aut(newdict),recoder))
 end
 
 Base.show(io::IO, pp::Spot.PostProcessor) = print(io,"PostProcessor(…)")
@@ -581,34 +569,31 @@ load_hoa(str,dict::APDict{Ta} = APDict()) where Ta = SpotAutomaton{Ta}(dict,Spot
 print_hoa(g::SpotAutomaton) = print(Buchi.Spot.string_hoa(g.x))
 
 function Base.:(*)(A::SpotAutomaton{NTuple{N,Ta}},B::SpotAutomaton{Ta}) where {N,Ta}
-    factory = get_factory(A.d)
-    @assert factory == get_factory(B.d)
+    @assert get_factory(A.d) == get_factory(B.d)
 
     # collapse the last of A with B
-    B₁ = view(factory,1,[zeros(Int,N-1)...;1])(B)
+    B₁ = project(B,[zeros(Int,N-1)...;1])
     C = intersect(A,B₁)
-    view(factory,N,1:N-1)(C)
+    project(C,1:N-1)
 end
 
 function Base.:(*)(A::SpotAutomaton{Ta},B::SpotAutomaton{NTuple{N,Ta}}) where {N,Ta}
-    factory = get_factory(A.d)
-    @assert factory == get_factory(B.d)
+    @assert get_factory(A.d) == get_factory(B.d)
 
     # collapse A with the first of B
-    A₁ = view(factory,1,[1;zeros(Int,N-1)...])(B)
+    A₁ = project(A,[1;zeros(Int,N-1)...])
     C = intersect(A₁,B)
-    view(factory,N,2:N)(C)
+    project(C,2:N)
 end
 
 function Base.:(*)(A::SpotAutomaton{NTuple{M,Ta}},B::SpotAutomaton{NTuple{N,Ta}}) where {M,N,Ta}
-    factory = get_factory(A.d)
-    @assert factory == get_factory(B.d)
+    @assert get_factory(A.d) == get_factory(B.d)
 
     # collapse the last of A with the first of B
-    A₁ = view(factory,M,vcat(1:M,zeros(Int,N-1)))(A)
-    B₁ = view(factory,N,vcat(zeros(Int,M-1),1:N))(B)
+    A₁ = project(A,vcat(1:M,zeros(Int,N-1)))
+    B₁ = project(B,vcat(zeros(Int,M-1),1:N))
     C = intersect(A₁,B₁)
-    view(factory,M+N-1,vcat(1:M-1,M+1:M+N-1))(C)
+    project(C,vcat(1:M-1,M+1:M+N-1))
 end
 
 Base.:(*)(A::SpotAutomaton{NTuple{N,Ta}},w::SpotOmegaWord{Ta}) where {N,Ta} = A*SpotAutomaton(w)
@@ -616,24 +601,23 @@ Base.:(*)(A::SpotAutomaton{NTuple{N,Ta}},w::SpotOmegaWord{Ta}) where {N,Ta} = A*
 Base.:(*)(w::SpotOmegaWord{Ta},A::SpotAutomaton{NTuple{N,Ta}}) where {N,Ta} = SpotAutomaton(w)*A
 
 function Base.:(*)(A::SpotAutomaton{NTuple{2,Ta}},w::SpotOmegaWord{Ta}) where Ta
-    factory = get_factory(A.d)
-    @assert factory[] == w.d
-    u = intersecting_word(A,view(factory,1,[0,1])(SpotAutomaton(w)))
+    @assert get_factory(A.d) == get_factory(w.d)
+    u = intersecting_word(A,project(SpotAutomaton(w),[0,1]))
     u==nothing && error("Could not find word in product")
-    view(factory,2,[1])(u,strip=true)
+    global uuuu
+    uuuu = u
+    project(u,1)
 end
 
 function Base.:(*)(w::SpotOmegaWord{Ta},A::SpotAutomaton{NTuple{2,Ta}}) where Ta
-    factory = get_factory(A.d)
-    @assert factory[] == w.d
-    u = intersecting_word(view(factory,1,[1,0])(SpotAutomaton(w)),A)
+    @assert get_factory(A.d) == get_factory(w.d)
+    u = intersecting_word(project(SpotAutomaton(w),[1,0]),A)
     u==nothing && error("Could not find word in product")
-    view(factory,2,[2])(u,strip=true)
+    project(u,2)
 end
 
 function Base.inv(A::SpotAutomaton{NTuple{N,Ta}}) where {N,Ta}
-    factory = get_factory(A.d)
-    view(factory,N,N:-1:1)(A)
+    project(A,N,N:-1:1)
 end
 
 Base.one(A::SpotAutomaton{NTuple{N,Ta}}) where {N,Ta} = leftone(A)
@@ -644,8 +628,7 @@ A left unit, i.e. an element `E` with `E*A == A`.
 This is what is also returned by `one`.
 """
 function leftone(A::SpotAutomaton{NTuple{N,Ta}}) where {N,Ta}
-    factory = get_factory(A.d)
-    view(factory,N,ones(Int,N))(A)
+    project(A,ones(Int,N))
 end
 
 """rightone(A)
@@ -653,8 +636,7 @@ end
 A right unit, i.e. an element `E` with `A*E == A`.
 """
 function rightone(A::SpotAutomaton{NTuple{N,Ta}}) where {N,Ta}
-    factory = get_factory(A.d)
-    view(factory,N,fill(N,N))(A)
+    project(A,fill(N,N))
 end
 
 # conversion
