@@ -2,6 +2,8 @@
 # also another. We encapsulate it in an Iterator{} structure.
 struct Iterator{T} x::T end
 
+pluralize(n::Real, singular::AbstractString, plural::AbstractString=singular*"s") = n == 1 ? singular : plural
+
 ################################################################
 
 """IntRefinablePartition{T}

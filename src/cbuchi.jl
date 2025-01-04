@@ -69,14 +69,14 @@ Base.isless(A::CBuchiAutomaton{Ti,Ta},B::CBuchiAutomaton{Ti,Ta}) where {Ti,Ta} =
 Base.hash(A::CBuchiAutomaton,h::UInt64) = hash(A.x,h)
 
 function Base.show(io::IO, A::CBuchiAutomaton)
-    print(io, "CBuchiAutomaton(", nstates(A)," state(s), ", ntransitions(A), " transition(s)…)")
+    print(io, "CBuchiAutomaton(", nstates(A)," ",pluralize(nstates(A),"state"),", ", ntransitions(A)," ",pluralize(ntransitions(A),"transition"),"…)")
 end
 
 function Base.show(io::IO, ::MIME"text/plain", A::CBuchiAutomaton)
     if isdefined(Main, :IJulia) && Main.IJulia.inited
         display_dot(io,A)
     else
-        print(io, "CBuchiAutomaton(", nstates(A)," state(s), ", ntransitions(A), " transition(s)…)")
+        show(io, A)
     end
 end
 

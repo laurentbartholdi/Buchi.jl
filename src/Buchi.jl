@@ -116,3 +116,6 @@ end
 
 # save in HOA format
 
+# add SimpleTraits (deterministic, ...) HasFactory on dictionaries, ...
+
+# add project operation on looping automata CBuchi

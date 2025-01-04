@@ -327,7 +327,7 @@ function accepting_run(A::SpotAutomaton{Ta}) where Ta
     SpotOmegaWord{UInt32}(A.d,r)
 end
     
-Base.show(io::IO, A::SpotAutomaton) = print(io, "SpotAutomaton(", nstates(A)," state(s), ", ntransitions(A), " transition(s)…)")
+Base.show(io::IO, A::SpotAutomaton) = print(io, "SpotAutomaton(", nstates(A)," ",pluralize(nstates(A),"state"),", ", ntransitions(A)," ",pluralize(ntransitions(A),"transition"),"…)")
 
 const spot_show_native = Ref(false)
 function Base.show(io::IO, mime::MIME"text/plain", A::SpotAutomaton)
@@ -340,7 +340,7 @@ function Base.show(io::IO, mime::MIME"text/plain", A::SpotAutomaton)
             display_dot(io,A |> split_edges)
         end
     else
-        print(io, "SpotAutomaton(", nstates(A)," state(s), ", ntransitions(A), " transition(s)…)")
+        show(io,A)
     end
 end
 
