@@ -77,9 +77,9 @@ function display_dot(io,A::BuchiAutomaton{Ta}) where Ta
         if isa(a,Ta)
             acc = ""
         else
-            a,acc = a[1],join(acc_chars[i+1] for i=a[2])
+            a,acc = a[1],join("""<FONT COLOR="Green">"""*acc_chars[i+1]*"</FONT>" for i=a[2])
         end
-        label = """[label="$(letterstring(A,a))$acc",fontsize=10]"""
+        label = "[label=<$(letterstring(A,a))$acc>,fontsize=10]"
         if do_split && isinitial(A,s)
             println(dot,"  $init [style=invis,fixedsize=true,height=0,width=0,label=\"\"]")
             println(dot,"  $init -> $t $label")

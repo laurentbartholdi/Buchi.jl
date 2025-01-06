@@ -177,6 +177,8 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
     .method("make_twa_word", [](spot::bdd_dict_ptr dict) { return spot::make_twa_word(dict); })
     .method("push_prefix!", [](spot::twa_word_ptr w, bdd v) { w->prefix.push_back(v); })
     .method("push_cycle!", [](spot::twa_word_ptr w, bdd v) { w->cycle.push_back(v); })
+    .method("append_prefix!", [](spot::twa_word_ptr w, jlcxx::ArrayRef<unsigned> v) { for (auto x: v) w->prefix.push_back(bdd_from_int(x)); })
+    .method("append_cycle!", [](spot::twa_word_ptr w, jlcxx::ArrayRef<unsigned> v) { for (auto x: v) w->cycle.push_back(bdd_from_int(x)); })
     .method("get_prefix_cycle", [](spot::twa_word_ptr w, jlcxx::ArrayRef<unsigned> _prefix, jlcxx::ArrayRef<unsigned> _cycle) { // we return vectors of unsigned, CxxWrap is not capable of handling vectors of weirder stuff
       // (we'll convert them back to BDDs using bdd_from_int)
       for (auto &t : w->prefix)

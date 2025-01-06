@@ -7,7 +7,7 @@ Base.show(io::IO, ::InfiniteOrdinal{1}) = print(io, "ω₁")
 const ω = InfiniteOrdinal{0}()
 const ω₁ = InfiniteOrdinal{1}()
 
-export ω, ω₁, OmegaWord, PeriodicVector
+export ω, ω₁, OmegaWord
 export distance, confinality
 
 Base.string(::InfiniteOrdinal{0}) = "ω"
@@ -195,15 +195,13 @@ function _trim(preperiod::Vector{T},period::Vector{T},copy=0) where T
     return preperiod,period
 end
 
-struct PeriodicVector{A} <: AbstractPeriodicVector{A}
-    preperiod::Vector{A}
-    period::Vector{A}
-    PeriodicVector{A}(preperiod,period;copy=false) where A = new(_trim(preperiod,period,copy)...)
-    PeriodicVector(preperiod::Vector{A},period::Vector{A};kwargs...) where A = PeriodicVector{A}(preperiod,period;kwargs...)
-    PeriodicVector{A}(v::Vector{A};kwargs...) where A = PeriodicVector{A}(A[],v;kwargs...)
-    PeriodicVector(v::Vector{A};kwargs...) where A = PeriodicVector(A[],v;kwargs...)
-end
+letterstring(i::Integer) = string(i)
+letterstring(c::Char) = string(c)
+letterstring(s::Symbol) = string(s)
+letterstring(t::Tuple) = join([letterstring(i) for i=t],":")
+letterstring(a,b) = letterstring(b) # discard extra information on container
 
+################################################################
 """OmegaWord{A}
 
 An ω-word, with period and preperiod of type `A`
@@ -217,14 +215,8 @@ struct OmegaWord{A} <: AbstractPeriodicVector{A}
     OmegaWord(v::Vector{A};kwargs...) where A = OmegaWord{A}(A[],v;kwargs...)
 end
 
-Base.size(v::AbstractPeriodicVector) = (length(v.preperiod),length(v.period))
-Base.size(v::AbstractPeriodicVector,i) = (i==1 ? length(v.preperiod) : i==2 ? length(v.period) : 1)
-
-letterstring(i::Integer) = string(i)
-letterstring(c::Char) = string(c)
-letterstring(s::Symbol) = string(s)
-letterstring(t::Tuple) = join([letterstring(i) for i=t],":")
-letterstring(a,b) = letterstring(b) # discard extra information on container
+Base.size(v::OmegaWord) = (length(v.preperiod),length(v.period))
+Base.size(v::AbstractPeriodicVector,i) = (1≤i≤2 ? size(v)[1] : 1)
 
 function Base.show(io::IO, ::MIME"text/plain", w::OmegaWord)
     for a=w.preperiod
@@ -236,13 +228,13 @@ function Base.show(io::IO, ::MIME"text/plain", w::OmegaWord)
     end
     print(io, "\e[0m")
 end
-Base.copy(w::AbstractPeriodicVector) = typeof(w)(copy(w.preperiod,w.period))
+Base.copy(w::OmegaWord) = typeof(w)(copy(w.preperiod,w.period))
 
-Base.hash(w::AbstractPeriodicVector,h::UInt64) = hash(w.preperiod,hash(w.period,h))
-function Base.:(==)(u::AbstractPeriodicVector,v::AbstractPeriodicVector)
+Base.hash(w::OmegaWord,h::UInt64) = hash(w.preperiod,hash(w.period,h))
+function Base.:(==)(u::OmegaWord,v::OmegaWord)
     return u.preperiod==v.preperiod && u.period==v.period
 end
-function Base.isless(u::AbstractPeriodicVector,v::AbstractPeriodicVector) # lexicographic
+function Base.isless(u::OmegaWord,v::OmegaWord) # lexicographic
     if u.preperiod==v.preperiod && u.period==v.period
         return false
     end
@@ -255,11 +247,11 @@ function Base.isless(u::AbstractPeriodicVector,v::AbstractPeriodicVector) # lexi
     end
 end
 
-Base.getindex(w::AbstractPeriodicVector,i::T) where T <: Integer = (i ≤ length(w.preperiod) ? w.preperiod[i] : w.period[mod1(i-length(w.preperiod),length(w.period))])
+Base.getindex(w::OmegaWord,i::T) where T <: Integer = (i ≤ length(w.preperiod) ? w.preperiod[i] : w.period[mod1(i-length(w.preperiod),length(w.period))])
 
 Base.getindex(w::AbstractPeriodicVector,i::UnitRange) = [w[j] for j=i]
 Base.getindex(w::AbstractPeriodicVector,i::StepRange) = [w[j] for j=i]
-function Base.getindex(w::AbstractPeriodicVector{A},i::InfiniteUnitRange) where A
+function Base.getindex(w::OmegaWord{A},i::InfiniteUnitRange) where A
     if i.start≤length(w.preperiod)+1
         typeof(w)(w.preperiod[i.start:end],w.period)
     else
@@ -271,7 +263,7 @@ function Base.getindex(w::AbstractPeriodicVector{A},i::InfiniteUnitRange) where 
         end
     end
 end
-function Base.getindex(w::AbstractPeriodicVector,i::InfiniteStepRange)
+function Base.getindex(w::OmegaWord,i::InfiniteStepRange)
     preperiod = w.preperiod[i.start:i.step:end]
     r = range(i.start+i.step*length(preperiod)-length(w.preperiod),step=i.step,length=length(w.period))
     typeof(w)(preperiod,w.period[mod1.(r,length(w.period))])
@@ -309,4 +301,4 @@ The unique purely-periodic word that is almost-everywhere the same as `u`.
 
 To test whether `u`,`v` are confinal, one can test `confinality(u)==confinality(v)`
 """
-confinality(u::AbstractPeriodicVector) = u[1+length(u.preperiod)*length(u.period):ω]
+confinality(u::AbstractPeriodicVector) = u[1+prod(size(u)):ω]

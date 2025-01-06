@@ -197,9 +197,10 @@ struct SpotOmegaWord{Ta} <: AbstractPeriodicVector{Ta}
     d::APDict{Ta}
     x::CxxWrap.StdLib.SharedPtrAllocated{Spot.TWAWord}
 end
+SpotOmegaWord(d::APDict{Ta}) where Ta = SpotOmegaWord(d,Spot.make_twa_word(bdd_dict(d)))
 
 function SpotOmegaWord(d::APDict{Ta},w::OmegaWord{Ta}) where Ta
-    sw = SpotOmegaWord{Ta}(d,Spot.make_twa_word(bdd_dict(d)))
+    sw = SpotOmegaWord(d)
     for a=w.preperiod
         Spot.push_prefix!(sw.x,d[a])
     end
@@ -209,12 +210,28 @@ function SpotOmegaWord(d::APDict{Ta},w::OmegaWord{Ta}) where Ta
     sw
 end
 
+function SpotOmegaWord(d::APDict{Ta},preperiod::AbstractVector{Ta},period::AbstractVector{Ta}) where Ta
+    sw = SpotOmegaWord(d)
+    for a=preperiod
+        Spot.push_prefix!(sw.x,d[a])
+    end
+    for a=period
+        Spot.push_cycle!(sw.x,d[a])
+    end
+    sw
+end
+
 SpotOmegaWord(d::APDict{Ta},v::AbstractVector{Ta},args...) where Ta = SpotOmegaWord(d,OmegaWord{Ta}(v,args...))
 
-function OmegaWord(w::SpotOmegaWord{Ta}) where Ta
+function __get_preperiod_period(w)
     preperiod = UInt32[]
     period = UInt32[]
     Spot.get_prefix_cycle(w.x,preperiod,period)
+    preperiod, period
+end
+
+function OmegaWord(w::SpotOmegaWord{Ta}) where Ta
+    preperiod, period = __get_preperiod_period(w)
     buchipreperiod = Ta[w.d(Spot.bdd_from_int(i)) for i=preperiod]
     buchiperiod = Ta[w.d(Spot.bdd_from_int(i)) for i=period]
     OmegaWord(buchipreperiod,buchiperiod)
@@ -234,6 +251,56 @@ function Base.show(io::IO, mime::MIME"text/plain", sw::SpotOmegaWord)
 end
 
 rawword(w::SpotOmegaWord) = SpotOmegaWord(APDict(get_aut(w.d)),w.x)
+
+Base.size(w::SpotOmegaWord) = length.(__get_preperiod_period(w))
+Base.copy(w::SpotOmegaWord) = w # seems immutable
+
+Base.hash(w::SpotOmegaWord,h::UInt64) = hash(OmegaWord(w))
+Base.:(==)(u::SpotOmegaWord,v::SpotOmegaWord) = OmegaWord(u)==OmegaWord(v)
+Base.isless(u::SpotOmegaWord,v::SpotOmegaWord) = isless(OmegaWord(u),OmegaWord(v))
+
+function Base.getindex(w::SpotOmegaWord,i::T) where T <: Integer
+    preperiod, period = __get_preperiod_period(w)
+    c = (i ≤ length(preperiod) ? preperiod[i] : period[mod1(i-length(preperiod),length(period))])
+    w.d(Spot.bdd_from_int(c))
+end
+function Base.getindex(w::SpotOmegaWord{A},i::InfiniteUnitRange) where A
+    sw = SpotOmegaWord(w.d)
+    preperiod, period = __get_preperiod_period(w)
+    
+    if i.start≤length(preperiod)+1
+        Spot.append_preperiod!(w.x,preperiod[i.start:end])
+        Spot.append_period!(w.x,period)
+    else
+        n = mod1(i.start-length(preperiod),length(period))
+        if n==0
+            Spot.append_period!(w.x,period)
+        else
+            Spot.append_period!(w.x,w.period[n:end])
+            Spot.append_period!(w.x,w.period[1:n-1])
+        end
+    end
+    sw
+end
+function Base.getindex(w::SpotOmegaWord,i::InfiniteStepRange)
+    sw = SpotOmegaWord(w.d)
+    preperiod, period = __get_preperiod_period(w)
+    spreperiod = preperiod[i.start:i.step:end]
+    Spot.append_preperiod!(w.x,spreperiod)
+    r = range(i.start+i.step*length(spreperiod)-length(preperiod),step=i.step,length=length(period))
+    Spot.append_period!(w.x,period[mod1.(r,length(period))])
+    sw
+end
+
+Base.map(f::Function,w::SpotOmegaWord) = SpotOmegaWord(map(f,w.preperiod),map(f,w.period))
+
+function Base.zip(ws::SpotOmegaWord...)
+    prefixlen = maximum(size.(ws,1))
+    period = lcm(size.(ws,2)...)
+    SpotOmegaWord(zip((w[1:prefixlen] for w=ws)...) |> collect,zip((w[prefixlen+1:prefixlen+period] for w=ws)...) |> collect)
+end
+
+!!!!
 
 ################################################################
 
