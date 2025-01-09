@@ -292,15 +292,20 @@ function Base.getindex(w::SpotOmegaWord,i::InfiniteStepRange)
     sw
 end
 
-Base.map(f::Function,w::SpotOmegaWord) = SpotOmegaWord(map(f,w.preperiod),map(f,w.period))
+function Base.map(f::Function,w::SpotOmegaWord)
+    sw = SpotOmegaWord(w.d)
+    preperiod, period = __get_preperiod_period(w)
+    mapper = a->Spot.id(w.d(f(w.d[Spot.bdd_from_int(a)])))
+    Spot.append_preperiod!(w.x,map(mapper,preperiod))
+    Spot.append_period!(w.x,map(mapper,period))
+    sw
+end
 
 function Base.zip(ws::SpotOmegaWord...)
     prefixlen = maximum(size.(ws,1))
     period = lcm(size.(ws,2)...)
-    SpotOmegaWord(zip((w[1:prefixlen] for w=ws)...) |> collect,zip((w[prefixlen+1:prefixlen+period] for w=ws)...) |> collect)
+    SpotOmegaWord(ws.d,zip((w[1:prefixlen] for w=ws)...) |> collect,zip((w[prefixlen+1:prefixlen+period] for w=ws)...) |> collect)
 end
-
-!!!!
 
 ################################################################
 
@@ -498,6 +503,8 @@ project(A::SpotAutomaton, inds::AbstractVector{T}) where T <: Integer = __projec
 project(A::SpotAutomaton{NTuple{M,Ta}}, inds::Integer) where {Ta,M} = __project_aut(A,M,[inds],true)
 project(A::SpotAutomaton{NTuple{M,Ta}}, inds::AbstractVector{T}) where {Ta,M,T <: Integer} = __project_aut(A,M,inds,false)
 
+diagonal(A::SpotAutomaton) = project(A,[1,2])
+    
 function __recoder_dict(A,m,inds,strip)
     n = length(inds)
     factory = get_factory(A.d)

@@ -540,3 +540,5 @@ end
 projection(i::Integer) = A->projection(A,i)
 
 #! isempty
+
+# more general projection: diagonal, etc.

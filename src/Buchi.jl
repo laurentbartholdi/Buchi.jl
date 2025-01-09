@@ -3,7 +3,9 @@ module Buchi
 using DataStructures
 using GraphViz
 using CxxWrap
+using FileIO
 
+# a submodule containing bindings to the spot C++ library
 module Spot
 
 using CxxWrap, Libdl
@@ -55,6 +57,7 @@ const acc_chars = ['⓪','①','②','③','④','⑤','⑥','⑦','⑧','⑨','
 # '⓿', '❶', '❷', '❸', '❹', '❺', '❻', '❼', '❽', '❾', '❿', '⓫', '⓬', '⓭', '⓮', '⓯', '⓰', '⓱', '⓲', '⓳', '⓴' # the sizes change a lot on my font
 
 const split_initial = Ref(true)
+const debug_display_dot = Ref(false)
 function display_dot(io,A::BuchiAutomaton{Ta}) where Ta
     do_split = split_initial[]
     for (_,(_,t))=A[] # test if there is an incoming edge
@@ -89,26 +92,13 @@ function display_dot(io,A::BuchiAutomaton{Ta}) where Ta
         end
     end
     println(dot,"}")
-    (@isdefined debug_display_dot) && println("display_dot:\n",join(readlines(seekstart(dot)),"\n"))
+    debug_display_dot[] && println("display_dot:\n",join(readlines(seekstart(dot)),"\n"))
     
     img = GraphViz.load(seekstart(dot))
     display("image/svg+xml", img)
 end
 
-"""Methods:
-
-* isempty
-* ∈
-
-"""
-
 # evaluate, enumerate (growth, entropy)
-
-# languages: intersect, union, Kleene star, etc.
-
-# minimize!
-
-# compose, project
 
 # examine truncation, action on length-n prefixes
 
