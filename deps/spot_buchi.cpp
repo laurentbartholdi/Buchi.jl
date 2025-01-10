@@ -313,7 +313,6 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
   mod.method("prop_very_weak", [](spot::twa_graph_ptr aut) { return aut->prop_very_weak(); });
   mod.method("prop_complete", [](spot::twa_graph_ptr aut) { return aut->prop_complete(); });
   mod.method("prop_universal", [](spot::twa_graph_ptr aut) { return aut->prop_universal(); });
-  mod.method("prop_deterministic", [](spot::twa_graph_ptr aut) { return aut->prop_deterministic(); });
   mod.method("prop_unambiguous", [](spot::twa_graph_ptr aut) { return aut->prop_unambiguous(); });
   mod.method("prop_semi_deterministic", [](spot::twa_graph_ptr aut) { return aut->prop_semi_deterministic(); });
   mod.method("prop_stutter_invariant", [](spot::twa_graph_ptr aut) { return aut->prop_stutter_invariant(); });
@@ -426,10 +425,10 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
     for (auto& t: w->cycle) {
       unsigned id = t.id();
       if (id >= xlator.size())
-	jl_error("xlator is too short. Did you remember to split_edges()?");");
+	jl_error("xlator is too short. Did you remember to split_edges()?");
       unsigned newid = xlator[id];
       if (newid == unsigned(-1))
-	jl_error("missing value in xlator. Did you remember to split_edges()?");");
+	jl_error("missing value in xlator. Did you remember to split_edges()?");
       res->cycle.push_back(bdd_from_int(newid));
     }
 
@@ -449,7 +448,7 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
 	jl_error("xlator is too short. Did you remember to split_edges()?");
       unsigned newid = xlator[id];
       if (newid == unsigned(-1))
-	jl_error("missing value in xlator. Did you remember to split_edges()?");");
+	jl_error("missing value in xlator. Did you remember to split_edges()?");
       res->new_edge(t.src, t.dst, bdd_from_int(newid), t.acc);
     }
 
