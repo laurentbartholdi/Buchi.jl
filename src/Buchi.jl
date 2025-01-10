@@ -66,7 +66,7 @@ function display_dot(io,A::BuchiAutomaton{Ta}) where Ta
         
     dot = IOBuffer()
     println(dot, """digraph buchi {
-  graph [label="$(acceptance_string(A))" fontsize=10 labelloc=t]
+  graph [label=<$(acceptance_string(A))> fontsize=10 labelloc=t]
 """)
     
     for s=states(A)
@@ -80,7 +80,7 @@ function display_dot(io,A::BuchiAutomaton{Ta}) where Ta
         if isa(a,Ta)
             acc = ""
         else
-            a,acc = a[1],join("""<FONT COLOR="Green">"""*acc_chars[i+1]*"</FONT>" for i=a[2])
+            a,acc = a[1],join("""<FONT COLOR="Green">"""*acc_chars[i+1]*" </FONT>" for i=a[2])
         end
         label = "[label=<$(letterstring(A,a))$acc>,fontsize=10]"
         if do_split && isinitial(A,s)
@@ -98,14 +98,23 @@ function display_dot(io,A::BuchiAutomaton{Ta}) where Ta
     display("image/svg+xml", img)
 end
 
-# evaluate, enumerate (growth, entropy)
-
-# examine truncation, action on length-n prefixes
-
 end
 
-# save in HOA format
+"""
+#!! TODO:
 
-# add SimpleTraits (deterministic, ...) HasFactory on dictionaries, ...
+* extract top of automaton, or of two automata, match their vertices, construct
+in this manner an idempotent; i.e. compute limit of a sequence of automata
 
-# add project operation on looping automata CBuchi
+* implement isunivalent, isinjective, issurjective, istotal, issymmetric, istransitive, isreflexive, isantisymmetric for relations
+
+* evaluate, enumerate (growth, entropy)
+
+* examine truncation, action on length-n prefixes
+
+* add SimpleTraits (deterministic, ...) HasFactory on dictionaries, ...
+
+* allow "initial=n" and "initial=[n₀,n₁,...]" to creation of automata
+
+* have general BuchiAutomaton(A,newtransitions) for code genericity
+"""

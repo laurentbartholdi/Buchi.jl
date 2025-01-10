@@ -107,14 +107,14 @@ Base.show(io::IO, factory::APDictFactory) = print(io,"APDictFactory(",length(fac
 
 alltuples(n,vars) = n==0 ? [()] : [(a...,v) for a=alltuples(n-1,vars) for v=vars]
 
+#!!! todo: get rid of variable n, make it extensible on-the-fly
+
 """APDictFactory(n::Int,vars::Vector{Ta})
 
 A "factory" is a holder for dictionaries over tuples of `Ta`. It supplies methods
 * `getindex(::APDictFactory,n::Int)` to produce a dictionary on n-tuples
 * `getindex(::APDictFactory)` to produce a dictionary on elements of `Ta`
-!!!* `view(::APDictFactory,m::Int,inds::Vector{Int})` to produce a function mapping automata on m-tuples into automata on length(inds)-tuples
 """
-
 function APDictFactory(n::Int,vars::AbstractVector{Ta}) where Ta
     naps = Int(ceil(log2(length(vars))))
     bdd_dict = Spot.make_bdd_dict()
@@ -243,11 +243,11 @@ function Base.show(io::IO, mime::MIME"text/plain", sw::SpotOmegaWord)
     for a=w.preperiod
         print(io, letterstring(sw,a))
     end
-    print(io, "\e[4;1m")
+    print(io, "(")
     for a=w.period
         print(io, letterstring(sw,a))
     end
-    print(io, "\e[0m")
+    print(io, ")ʷ")
 end
 
 rawword(w::SpotOmegaWord) = SpotOmegaWord(APDict(get_aut(w.d)),w.x)
@@ -622,23 +622,40 @@ Base.symdiff(A::SpotAutomaton{Ta},B::SpotAutomaton{Ta}) where Ta = A ⊻ B
 # beware! A,B have to be deterministic
 function ↔(A::SpotAutomaton{Ta},B::SpotAutomaton{Ta}) where Ta
     @assert A.d==B.d
+    @assert Spot.prop_deterministic(A.x)
     SpotAutomaton(A.d,Spot.product_xnor(A.x,B.x))
 end
 
 function Base.:(⊆)(A::SpotAutomaton{Ta},B::SpotAutomaton{Ta}) where Ta
-    isdisjoint(A,~B)
+    @assert A.d==B.d
+    Spot.contains(A,B)
 end
 
 function Base.:(==)(A::SpotAutomaton{Ta},B::SpotAutomaton{Ta}) where Ta
     @assert A.d==B.d
-    Buchi.Spot.:(==)(A.x,B.x)
+    Spot.are_equivalent(A.x,B.x)
 end
 
 function Base.:(~)(A::SpotAutomaton{Ta}) where Ta
     SpotAutomaton(A.d,Spot.complement(A.x))
 end
 
-load_hoa(str,dict::APDict{Ta} = APDict()) where Ta = SpotAutomaton{Ta}(dict,Spot.load_hoa(str,bdd_dict(dict)))
+function parse_hoa(str::AbstractString,dict::APDict{Ta} = APDict()) where Ta
+    A = Spot.parse_hoa_string(str,bdd_dict(dict))
+    isptrnull(A) && error("Could not parse automaton")
+    SpotAutomaton{Ta}(dict,A)
+end
+
+# todo: add support for aliases, to be built into dictionary
+function fileio_load(name::File,dict::APDict{Ta} = APDict()) where Ta
+    A = Spot.parse_hoa(filename(name),bdd_dict(dict))
+    isptrnull(A) && error("Could not parse automaton")
+    SpotAutomaton{Ta}(dict,A)
+end
+
+function fileio_save(name::File,A::SpotAutomaton)
+    Spot.save_hoa(filename(name),A.x)
+end
 
 print_hoa(g::SpotAutomaton) = print(Buchi.Spot.string_hoa(g.x))
 
@@ -691,7 +708,7 @@ function Base.:(*)(w::SpotOmegaWord{Ta},A::SpotAutomaton{NTuple{2,Ta}}) where Ta
 end
 
 function Base.inv(A::SpotAutomaton{NTuple{N,Ta}}) where {N,Ta}
-    project(A,N,N:-1:1)
+    project(A,N:-1:1)
 end
 
 Base.one(A::SpotAutomaton{NTuple{N,Ta}}) where {N,Ta} = leftone(A)
@@ -716,6 +733,7 @@ end
 # conversion
 function SpotAutomaton(d::APDict{Ta},A::CBuchiAutomaton{Ti,Ta}) where {Ti,Ta}
     B = SpotAutomaton(d,nstates(A))
+    # by default, initial is 0, and acceptance condition is true
     for (s,(a,t))=A[]
         push!(B,s-1=>a=>t-1)
     end
@@ -726,10 +744,31 @@ function CBuchiAutomaton(A::SpotAutomaton{Ta}) where Ta
     to_monitor_deterministic = postprocessor(outputtype = :Monitor, preference = :Deterministic)
 
     A₁ = to_monitor_deterministic(A) |> split_edges
-    CBuchiAutomaton{Int,Ta}(nstates(A₁),[s+1=>a=>t+1 for (s,((a,_),t))=A₁[]])
+    CBuchiAutomaton{Int,Ta}(nstates(A₁),[1+s=>a=>1+t for (s,((a,_),t))=A₁[]],initial=1+initial(A₁))
 end
 
-#!! save to HOA format, add interface to FileIO
-# add_format(format"PPMBinary", "P6", ".ppm", [:Netpbm => UUID("f09324ee-3d7c-5217-9330-fc30815ba969")])
+#!!! keep acceptance condition too
+#!!! for modularity: BuchiAutomaton(A,newtransitions) should produce
+#    an automaton with same acceptance, dict etc. as A but new transitions
+function subautomaton(A::SpotAutomaton{Ta}, s) where Ta
+    lookup = zeros(Int,nstates(A))
+    lookup[begin.+s] = 0:length(s)-1
+    B = SpotAutomaton{Ta}(A.d,(lookup[begin+s]=>a=>lookup[begin+t] for (s,(a,t))=A[] if lookup[begin+s]≠0 && lookup[begin+t]≠0))
+end
 
-#!! add traits to keep track of determinism etc.
+function __dfs_spot_top(A,s,seen,result,radius) # need new version, 0-based
+    seen[begin+s] && return
+    seen[begin+s] = true
+    push!(result,s)
+    radius==0 && return
+    for (_,t)=A[s]
+        __dfs_top(A,t,seen,result,radius-1)
+    end
+end
+
+function top(A::SpotAutomaton{Ta},radius,root=initial(A)) where Ta
+    seen = falses(nstates(A))
+    result = Int[]
+    __dfs_top(A,root,seen,result,radius)
+    subautomaton(A,result)
+end

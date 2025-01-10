@@ -13,7 +13,19 @@ struct CBuchiAutomaton{Ti,Ta} <: BuchiAutomaton{Ta}
     CBuchiAutomaton{Ti,Ta}(data; kwargs...) where {Ti,Ta} = CBuchiAutomaton{Ti,Ta}(1, data; kwargs...)
     CBuchiAutomaton{Ti,Ta}(head, tail...; kwargs...) where {Ti,Ta} = CBuchiAutomaton{Ti,Ta}(1, [head,tail...]; kwargs...)
 
-    function CBuchiAutomaton{Ti,Ta}(n::Integer, data; sorted = false, minimize = true) where {Ti,Ta}
+    function CBuchiAutomaton{Ti,Ta}(n::Integer, data; sorted = false, minimize = true, initial = 1) where {Ti,Ta}
+        if isa(initial,Int) && initial≠1 # swap 1 and initial
+            data = ((s==initial ? 1 : s==1 ? initial : s)=>a=>(t==initial ? 1 : t==1 ? initial : t) for (s,(a,t))=data)
+        elseif isa(initial,AbstractVector)
+            n += 1
+            # move 1 out of the way
+            newdata = [(s==1 ? n : s)=>a=>(t==1 ? n : t) for (s,(a,t))=data]
+            # and add transitions from 1 to all initial
+            for i=initial, (s,(a,t))=data
+                i==s && push!(newdata,1=>a=>(t==1 ? n : t))
+            end
+            data = newdata
+        end
         A = new(VectorVector{Ti,Pair{Ta,Ti}}(data; sorted = sorted))
         resize!(A,n)
 
@@ -105,9 +117,27 @@ end
 Removes from A all states that cannot be reached from the initial state
 """
 function remove_unreachables!(A::CBuchiAutomaton{Ti,Ta},r=initial(A)) where {Ti,Ta}
-    unseen = trues(nstates(A))
+    n = nstates(A)
+    unseen = trues(n)
     __unreachables_scan(A,r,unseen)
-    deleteat!(A.x,unseen)
+    if any(unseen)
+        deleteat!(A.x,unseen)
+        relabel = Ti[]
+        j = 1
+        for i=1:n
+            if unseen[i]
+                push!(relabel,0)
+            else
+                push!(relabel,j)
+                j += 1
+            end
+        end
+        for i=1:nstates(A), j=1:length(A[i])
+            (a,t) = A[i][j]
+            A[i][j] = a=>relabel[t]
+        end
+    end
+    A
 end
 
 """remove_deadends!(A)
@@ -320,6 +350,30 @@ function Base.:(∈)(w::OmegaWord{Ta},A::CBuchiAutomaton{Ti,Ta}) where {Ti,Ta}
     end
 end
 
+function __isnotempty_scan(A,s,visited,stack)
+    s>nstates(A) && return false # we're out of edges
+
+    if !visited[s]
+        # mark the current node as visited and part of recursion stack
+        visited[s] = stack[s] = true
+
+        # recur on all the successors
+        for (_,t)=A[s]
+            if !visited[t] && __isnotempty_scan(A,t,visited,stack)
+                return true
+            elseif stack[t]
+                return true
+            end
+        end
+
+        # remove the vertex from recursion stack
+        stack[s] = false
+    end
+    false
+end
+
+Base.isempty(A::CBuchiAutomaton) = !__isnotempty_scan(A,initial(A),falses(nstates(A)),falses(nstates(A)))
+
 """subautomaton(A,s)
 
 Returns the subautomaton of `A` on the list of states `s`
@@ -380,16 +434,16 @@ function top(A::CBuchiAutomaton,radius,root=initial(A))
     seen = falses(nstates(A))
     result = Int[]
     __dfs_top(A,root,seen,result,radius)
-    Buchi.subautomaton(A,result;minimize=false)
+    subautomaton(A,result;minimize=false)
 end
 
 """spheres(A)
 
 Returns a list `S` of lists of states of `A`, where `S[1+i]` is the list of all states at distance `i` from the initial state.
 """
-function spheres(A,root=initial(A))
+function spheres(A::BuchiAutomaton,root=initial(A))
     queue = Queue{Pair{Int,Int}}()
-    dist = fill(9999,nstates(A))
+    dist = fill(typemax(Int),nstates(A))
     sphere = Vector{Int}[]
     enqueue!(queue,root=>0)
     while !isempty(queue)
@@ -539,6 +593,4 @@ function projection(A::CBuchiAutomaton{Ti,Ta},i) where {Ti,Ta <: Tuple}
 end
 projection(i::Integer) = A->projection(A,i)
 
-#! isempty
-
-# more general projection: diagonal, etc.
+# more general projections

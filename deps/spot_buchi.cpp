@@ -1,5 +1,6 @@
 #include <sstream>
 #include <iostream>
+#include <fstream>
 
 #include <jlcxx/jlcxx.hpp>
 #include <jlcxx/stl.hpp>
@@ -31,6 +32,7 @@
 #include <spot/twaalgos/canonicalize.hh>
 #include <spot/twaalgos/product.hh>
 #include <spot/twaalgos/complement.hh>
+#include <spot/twaalgos/contains.hh>
 
 #include <spot/parseaut/public.hh>
 
@@ -117,7 +119,7 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
     .method("is_dnf", &spot::acc_cond::acc_code::is_dnf)
     .method("to_text", [](spot::acc_cond::acc_code &ac) {
       std::stringstream s;
-      ac.to_text(s, [](std::ostream& os, int v) { os << DIGIT[v]; });
+      ac.to_text(s, [](std::ostream& os, int v) { os << "<FONT COLOR=\"Green\">" << DIGIT[v] << "</FONT>"; });
       return s.str();
     })
     .method("complement", &spot::acc_cond::acc_code::complement);
@@ -267,7 +269,7 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
     // remove_unused_ap
     // copy_state_names_from
     // state_acc_sets
-  mod.method("==", [](spot::twa_graph_ptr me, spot::twa_graph_ptr you) { return *me == *you; });
+  mod.method("===", [](spot::twa_graph_ptr me, spot::twa_graph_ptr you) { return *me == *you; });
   mod.method("kill_state!", [](spot::twa_graph_ptr aut, unsigned state) { return aut->kill_state(state); });
     // dump_storage_as_dot
     // succ
@@ -311,7 +313,7 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
   mod.method("prop_very_weak", [](spot::twa_graph_ptr aut) { return aut->prop_very_weak(); });
   mod.method("prop_complete", [](spot::twa_graph_ptr aut) { return aut->prop_complete(); });
   mod.method("prop_universal", [](spot::twa_graph_ptr aut) { return aut->prop_universal(); });
-  mod.method("prop_deterministic", [](spot::twa_graph_ptr aut) { return aut->prop_semi_deterministic(); });
+  mod.method("prop_deterministic", [](spot::twa_graph_ptr aut) { return aut->prop_deterministic(); });
   mod.method("prop_unambiguous", [](spot::twa_graph_ptr aut) { return aut->prop_unambiguous(); });
   mod.method("prop_semi_deterministic", [](spot::twa_graph_ptr aut) { return aut->prop_semi_deterministic(); });
   mod.method("prop_stutter_invariant", [](spot::twa_graph_ptr aut) { return aut->prop_stutter_invariant(); });
@@ -325,6 +327,9 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
   mod.method("product_xnor", [](spot::twa_graph_ptr left, spot::twa_graph_ptr right) { return spot::product_xnor(left,right); });
   mod.method("complement", [](spot::twa_graph_ptr aut) { return spot::complement(aut); });
 
+  mod.method("contains", [](spot::twa_graph_ptr left, spot::twa_graph_ptr right) { return spot::contains(left,right); });
+  mod.method("are_equivalent", [](spot::twa_graph_ptr left, spot::twa_graph_ptr right) { return spot::are_equivalent(left,right); });
+  
   mod.method("as_twa", [](spot::twa_run_ptr run) { return run->as_twa(); });
   
   mod.method("canonicalize", spot::canonicalize);
@@ -342,12 +347,24 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
     return buffer.str();
   });
 
-  mod.method("load_hoa", [](std::string str, spot::bdd_dict_ptr dict) {
+  mod.method("save_hoa", [](std::string filename, spot::twa_graph_ptr aut) {
+    std::ofstream stream(filename);
+    spot::print_hoa(stream, aut);
+    stream << std::endl;
+  });
+  
+  mod.method("parse_hoa_string", [](std::string str, spot::bdd_dict_ptr dict) {
     auto p = spot::automaton_stream_parser(str.c_str(), "<julia>");
     auto aut = p.parse(dict);
     return aut->aut;
   });
 
+  mod.method("parse_hoa", [](std::string filename, spot::bdd_dict_ptr dict) {
+    auto p = spot::automaton_stream_parser(filename);
+    auto aut = p.parse(dict);
+    return aut->aut;
+  });
+  
   mod.method("as_automaton", [](spot::twa_word_ptr w) { return w->as_automaton(); });
   mod.method("intersects", [](spot::twa_word_ptr w, spot::const_twa_ptr aut) { return w->intersects(aut); });
   mod.method("intersects", [](spot::twa_word_ptr w, spot::const_twa_graph_ptr aut) { return w->intersects(aut); });
@@ -409,10 +426,10 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
     for (auto& t: w->cycle) {
       unsigned id = t.id();
       if (id >= xlator.size())
-	jl_error("xlator is too short");
+	jl_error("xlator is too short. Did you remember to split_edges()?");");
       unsigned newid = xlator[id];
       if (newid == unsigned(-1))
-	jl_error("missing value in xlator");
+	jl_error("missing value in xlator. Did you remember to split_edges()?");");
       res->cycle.push_back(bdd_from_int(newid));
     }
 
@@ -429,10 +446,10 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
     for (auto& t: aut->edges()) {
       unsigned id = t.cond.id();
       if (id >= xlator.size())
-	jl_error("xlator is too short");
+	jl_error("xlator is too short. Did you remember to split_edges()?");
       unsigned newid = xlator[id];
       if (newid == unsigned(-1))
-	jl_error("missing value in xlator");
+	jl_error("missing value in xlator. Did you remember to split_edges()?");");
       res->new_edge(t.src, t.dst, bdd_from_int(newid), t.acc);
     }
 

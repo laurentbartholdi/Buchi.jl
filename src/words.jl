@@ -222,11 +222,13 @@ function Base.show(io::IO, ::MIME"text/plain", w::OmegaWord)
     for a=w.preperiod
         print(io, letterstring(a))
     end
-    print(io, "\e[4;1m")
+#    print(io, "\e[4;1m")
+    print(io,"(")
     for a=w.period
         print(io, letterstring(a))
     end
-    print(io, "\e[0m")
+#    print(io, "\e[0m")
+    print(io,")ʷ")
 end
 Base.copy(w::OmegaWord) = typeof(w)(copy(w.preperiod,w.period))
 
