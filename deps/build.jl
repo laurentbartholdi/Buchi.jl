@@ -6,6 +6,6 @@ cd(string(VERSION)) do
     run(`cmake --build . --config Release`)
 end
 
-isdir("roll-library") && cd("roll-library") do
+isfile("roll-library/build.sh") && cd("roll-library") do
     run(setenv(`./build.sh`,"PATH"=>"/opt/homebrew/bin:"*ENV["PATH"]))
 end
