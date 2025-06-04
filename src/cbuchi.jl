@@ -593,4 +593,17 @@ function projection(A::CBuchiAutomaton{Ti,Ta},i) where {Ti,Ta <: Tuple}
 end
 projection(i::Integer) = A->projection(A,i)
 
-# more general projections
+#!!! more general projections
+
+#!!! print_ba, print_hoa, load_ba, load_hoa with option "CBuchiAutomaton"
+"""
+function print_ba(stream,A)
+    write(stream,"[",string(initial(A)),"]\n")
+    for (s,(a,t))=A[]
+        println(stream,a,",[",string(s),"]->[",string(t),"]\n")
+    end
+    
+    println(stream)
+end
+
+"""

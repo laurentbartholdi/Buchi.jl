@@ -10,7 +10,7 @@ module Spot
 
 using CxxWrap, Libdl
 
-get_path() = joinpath(@__DIR__,"../deps/lib","libspot_buchi.$(Libdl.dlext)")
+get_path() = joinpath(@__DIR__,"../deps/$VERSION/lib","libspot_buchi.$(Libdl.dlext)")
 
 @wrapmodule get_path
 
@@ -98,6 +98,55 @@ function display_dot(io,A::BuchiAutomaton{Ta}) where Ta
     display("image/svg+xml", img)
 end
 
+const BA_SPECIAL = (','=>'‚','-'=>'—','>'=>'›')
+const BA_SPECIAL_REVERSE = tuple((a=>b for (b,a)=Buchi.BA_SPECIAL)...)
+ba_encode(s) = replace(string(s),BA_SPECIAL...)
+ba_decode(s) = replace(s,BA_SPECIAL_REVERSE...)
+
+function parse_ba(stream)
+    # initial state
+    l = readline(stream)
+    state_num = Dict(l=>1)
+    states = [l]
+    alphabet_num = Dict{String,Int}()
+    alphabet = String[]
+    finals = Int[]
+    transitions = Tuple{Int,String,Int}[]
+    while true
+        l = readline(stream)
+        isempty(l) && break
+        m = match(r"(.*),(.*)->(.*)",l)
+        if m==nothing
+            haskey(state_num,l) || error("Line '$l' is neither a transition nor a final state")
+            push!(finals,state_num[l])
+        else
+            s = ba_decode(m[1])
+            if !haskey(alphabet_num,s)
+                push!(alphabet,s)
+                alphabet_num[s] = length(alphabet)
+            end
+            if !haskey(state_num,m[2])
+                push!(states,m[2])
+                state_num[m[2]] = length(states)
+            end
+            if !haskey(state_num,m[3])
+                push!(states,m[3])
+                state_num[m[3]] = length(states)
+            end
+            push!(transitions,(state_num[m[2]],s,state_num[m[3]]))
+        end
+    end
+
+    if false
+        # we can try to guess the type, and evaluate etc., but it seems
+        # better to just return strings, and do the matching later.
+        alphabet = eval.(Meta.parse.(alphabet))
+        T = promote_type(typeof.(alphabet)...)
+        alphabet = convert(Vector{T},alphabet)
+        alphabet_num = convert(Dict{T,Int},alphabet_num)
+        transitions = convert(Vector{Tuple{Int,T,Int}},transitions)
+    end
+    (states = states, state_num, alphabet_num, alphabet, transitions, finals)
 end
 
 """
@@ -117,4 +166,8 @@ in this manner an idempotent; i.e. compute limit of a sequence of automata
 * allow "initial=n" and "initial=[n₀,n₁,...]" to creation of automata
 
 * have general BuchiAutomaton(A,newtransitions) for code genericity
+
+set_aliases() to set aliases in Spot automaton; call it before printing, to implement dict.
+get_aliases()
 """
+end

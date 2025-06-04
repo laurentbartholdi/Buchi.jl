@@ -90,10 +90,10 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
     .method("is_maybe", &spot::trival::is_maybe)
     .method("is_true", &spot::trival::is_true)
     .method("is_false", &spot::trival::is_false)
-    .method("TriValue", &spot::trival::val)
-    .method("Bool", &spot::trival::operator bool);
+    .method("TriValue", &spot::trival::val);
   mod.set_override_module(jl_base_module);
-  mod.method("!", [](spot::trival x) { return !x; }); // cannot directly add method to Base :(
+  mod.method("Bool", [](spot::trival x) { return bool(x); }); // cannot directly add method to Base :(
+  mod.method("!", [](spot::trival x) { return !x; });
   mod.unset_override_module();
  
   // dictionary of BDDs.
@@ -104,15 +104,25 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
 
   mod.method("string_psl", [](bdd b, spot::bdd_dict_ptr d) { std::stringstream s; spot::print_psl(s, spot::bdd_to_formula(b,d)); return s.str(); });
   
-  // acceptance condition
-  mod.add_type<spot::acc_cond>("AccCond")
-    .method("name", &spot::acc_cond::name);
-
   // acceptance mark_t
   mod.add_type<spot::acc_cond::mark_t>("MarkT")
     .method("new_mark_t", [](std::vector<unsigned> &v) { return spot::acc_cond::mark_t(v.begin(), v.end()); })
     .method("count", &spot::acc_cond::mark_t::count)
     .method("fill", [](spot::acc_cond::mark_t &m) { std::vector<unsigned> v; m.fill(std::back_inserter(v)); return v; });
+
+  // acceptance condition
+  mod.add_type<spot::acc_cond>("AccCond")
+    .method("name", &spot::acc_cond::name)
+    .method("accepting", &spot::acc_cond::accepting)    
+    .method("is_all", &spot::acc_cond::is_all)
+    .method("is_buchi", &spot::acc_cond::is_buchi)
+    .method("is_co_buchi", &spot::acc_cond::is_co_buchi)
+    .method("is_f", &spot::acc_cond::is_f)
+    .method("is_none", &spot::acc_cond::is_none)
+    .method("is_parity", [](spot::acc_cond &acc) { return acc.is_parity(); })
+    .method("is_rabin", &spot::acc_cond::is_rabin)
+    .method("is_streett", &spot::acc_cond::is_streett)
+    .method("is_t", &spot::acc_cond::is_t);
 
   // acceptance code
   mod.add_type<spot::acc_cond::acc_code>("AccCode")
@@ -258,6 +268,7 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
     // univ_dests
   mod.method("is_existential", [](spot::twa_graph_ptr aut) { return aut->is_existential(); });
     // states
+  mod.method("state_acc_sets", [](spot::twa_graph_ptr aut, unsigned s) { return aut->state_acc_sets(s); });
     // edge_vector
     // is_dead_edge
   mod.method("merge_edges!", [](spot::twa_graph_ptr aut) { return aut->merge_edges(); });
@@ -268,7 +279,6 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
     // purge_unreachable_states
     // remove_unused_ap
     // copy_state_names_from
-    // state_acc_sets
   mod.method("===", [](spot::twa_graph_ptr me, spot::twa_graph_ptr you) { return *me == *you; });
   mod.method("kill_state!", [](spot::twa_graph_ptr aut, unsigned state) { return aut->kill_state(state); });
     // dump_storage_as_dot
@@ -293,8 +303,8 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
   mod.method("get_acceptance", [](spot::twa_graph_ptr aut) { return aut->get_acceptance(); });
   mod.method("set_acceptance!", [](spot::twa_graph_ptr aut, unsigned num, const spot::acc_cond::acc_code &c) { return aut->set_acceptance(num, c); });
   mod.method("set_acceptance!", [](spot::twa_graph_ptr aut, const spot::acc_cond::acc_code &c) { return aut->set_acceptance(c); });
-  mod.method("copy_acceptance_of", [](spot::twa_graph_ptr me, spot::twa_graph_ptr you) { return me->copy_acceptance_of(you); });
-  mod.method("copy_ap_of", [](spot::twa_graph_ptr me, spot::twa_graph_ptr you) { return me->copy_ap_of(you); });
+  mod.method("copy_acceptance_of", [](spot::twa_graph_ptr me, const spot::twa_graph_ptr you) { return me->copy_acceptance_of(you); });
+  mod.method("copy_ap_of", [](spot::twa_graph_ptr me, const spot::twa_graph_ptr you) { return me->copy_ap_of(you); });
     // copy_named_properties_of
   mod.method("set_generalized_buchi!", [](spot::twa_graph_ptr aut, unsigned n) { return aut->set_generalized_buchi(n); });
   mod.method("set_generalized_co_buchi!", [](spot::twa_graph_ptr aut, unsigned n) { return aut->set_generalized_co_buchi(n); });
@@ -333,6 +343,7 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
   
   mod.method("canonicalize", spot::canonicalize);
   mod.method("split_edges", spot::split_edges);
+  mod.method("sbacc", spot::sbacc);
 
   mod.method("string_dot", [](spot::twa_graph_ptr aut, std::string options) {
     std::ostringstream buffer;
@@ -363,7 +374,35 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
     auto aut = p.parse(dict);
     return aut->aut;
   });
-  
+
+  mod.method("set_aliases!", [](spot::twa_graph_ptr g, const std::string data) {//! cannot pass/use const jlcxx::ArrayRef<std::pair<std::string,unsigned>> &alias
+    std::vector<std::pair<std::string,bdd>> aliases;
+    size_t pos = 0, new_pos;
+    while ((new_pos = data.find('@',pos)) != std::string::npos) {
+      std::string name = data.substr(pos,new_pos-pos);
+      new_pos++;
+      pos = data.find('@',new_pos);
+      bdd val = bdd_from_int(std::stoi(data.substr(new_pos,pos-new_pos)));
+      pos++;
+      aliases.push_back(std::make_pair(name,val));
+    }
+    spot::set_aliases(g, aliases);
+  });
+  mod.method("get_aliases", [](spot::twa_graph_ptr g) {
+    auto aliases = spot::get_aliases(g);
+    if (aliases == NULL)
+      return std::string("");
+    std::string result("");
+    // big hack! we just print the data separated by @
+    for (auto &p : *aliases) {
+      result += p.first;
+      result += '@';
+      result += std::to_string(p.second.id());
+      result += '@';
+    }
+    return result;
+  });
+
   mod.method("as_automaton", [](spot::twa_word_ptr w) { return w->as_automaton(); });
   mod.method("intersects", [](spot::twa_word_ptr w, spot::const_twa_ptr aut) { return w->intersects(aut); });
   mod.method("intersects", [](spot::twa_word_ptr w, spot::const_twa_graph_ptr aut) { return w->intersects(aut); });
@@ -432,6 +471,13 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
       res->cycle.push_back(bdd_from_int(newid));
     }
 
+    return res;
+  });
+  mod.method("copy", [](const spot::twa_graph_ptr aut) {
+    auto res = make_twa_graph(aut->get_dict());
+    res->copy_acceptance_of(aut);
+    res->copy_ap_of(aut);
+    res->prop_copy(aut, spot::twa::prop_set::all());
     return res;
   });
   mod.method("recode_aut", [](spot::twa_graph_ptr aut, spot::twa_graph_ptr model, jlcxx::ArrayRef<unsigned> xlator) {

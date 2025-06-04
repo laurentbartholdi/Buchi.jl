@@ -197,6 +197,7 @@ end
 
 letterstring(i::Integer) = string(i)
 letterstring(c::Char) = string(c)
+letterstring(s::String) = s
 letterstring(s::Symbol) = string(s)
 letterstring(t::Tuple) = join([letterstring(i) for i=t],":")
 letterstring(a,b) = letterstring(b) # discard extra information on container

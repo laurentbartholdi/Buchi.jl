@@ -72,7 +72,7 @@ function mark(P::IntRefinablePartition{T},e::T) where T
     nothing
 end
 
-function split(P::IntRefinablePartition)
+function Base.split(P::IntRefinablePartition)
     while !isempty(P.touched)
         s = pop!(P.touched)
         j = P.marked[s]

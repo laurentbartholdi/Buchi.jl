@@ -39,6 +39,9 @@ binary-encoded Boolean expressions.
 * `get_factory(::APDict)` to access, if it exists, an `APDictFactory` that produces dictionaries for tuples.
 """
 abstract type APDict{Ta} end
+Base.eltype(d::APDict{Ta}) where Ta = Pair{Ta,Spot.BDD}
+Base.keytype(d::APDict{Ta}) where Ta = Ta
+Base.valtype(d::APDict) = Spot.BDD
 
 struct PlainAPDict{Ta} <: APDict{Ta}
     s2i::Dict{Ta,Spot.BDD}
@@ -52,11 +55,16 @@ Base.getindex(d::PlainAPDict{Ta},a::Ta) where Ta = d.s2i[a]
 (d::PlainAPDict)(v::Spot.BDD) = d.i2s[v]
 get_aut(d::PlainAPDict) = d.aut
 get_factory(d::PlainAPDict) = error("Plain AP dictionaries have no factory")
+get_s2i(d::PlainAPDict) = d.s2i
+Base.length(d::PlainAPDict) = length(d.s2i)
+Base.keys(d::PlainAPDict) = keys(d.s2i)
+Base.values(d::PlainAPDict) = values(d.s2i)
+Base.iterate(d::PlainAPDict) = iterate(d.s2i)
 
 function int2var(i,aps)
     naps = length(aps)
     s = digits(i-1,base=2,pad=naps)
-    reduce(&, s[k]==1 ? aps[k] : !aps[k] for k=1:naps)
+    reduce(&, (s[k]==1 ? aps[k] : !aps[k] for k=1:naps),init=Spot.bdd_true())
 end
 
 function APDict(vars::AbstractVector{Ta}) where Ta
@@ -79,6 +87,16 @@ function APDict(vars::AbstractVector{Ta}) where Ta
 end
 APDict(v::Ta, tail::Ta...) where Ta = APDict([v,tail...])
 
+function APDict(dict::Dict{Ta,Spot.BDD}) where Ta
+    d = PlainAPDict{Ta}(Spot.make_twa_graph(Spot.make_bdd_dict()))
+
+    for (k,v)=dict
+        d.s2i[k] = v
+        d.i2s[v] = k
+    end
+    d
+end
+
 # disable lookup for "trivial" dictionary where we keep the BDD
 struct TrivialAPDict <: APDict{Spot.BDDAllocated}
     aut::CxxWrap.StdLib.SharedPtrAllocated{Buchi.Spot.TWAGraph} # an automaton just to store the variables
@@ -89,6 +107,7 @@ Base.getindex(d::TrivialAPDict,a::Spot.BDD) = a
 (d::TrivialAPDict)(v::Spot.BDD) = v
 get_aut(d::TrivialAPDict) = d.aut
 get_factory(d::TrivialAPDict) = error("Trivial AP dictionaries have no factory")
+get_s2i(d::TrivialAPDict) = Dict{Spot.BDD,Spot.BDD}()
 
 APDict() = TrivialAPDict(Spot.make_twa_graph(Spot.make_bdd_dict()))
 APDict(a::StdLib.SharedPtrAllocated{Spot.TWAGraph}) = TrivialAPDict(a)
@@ -108,6 +127,8 @@ Base.show(io::IO, factory::APDictFactory) = print(io,"APDictFactory(",length(fac
 alltuples(n,vars) = n==0 ? [()] : [(a...,v) for a=alltuples(n-1,vars) for v=vars]
 
 #!!! todo: get rid of variable n, make it extensible on-the-fly
+
+#!!! even better: APDictFactory(dict) creates the factory from a dict???
 
 """APDictFactory(n::Int,vars::Vector{Ta})
 
@@ -154,7 +175,7 @@ function APDictFactory(n::Int,vars::AbstractVector{Ta}) where Ta
         end
         
         for t=alltuples(i,vars)
-            v = reduce(&, factory.bdd[t[ii],ii] for ii=1:i)
+            v = reduce(&, (factory.bdd[t[ii],ii] for ii=1:i),init=Spot.bdd_true())
             d.s2i[t] = v
             d.i2s[v] = t
         end
@@ -174,6 +195,7 @@ Base.getindex(d::TupleAPDict,a) = d.d[a]
 (d::TupleAPDict)(v) = d.d(v)
 get_aut(d::TupleAPDict) = get_aut(d.d)
 get_factory(d::TupleAPDict) = d.factory
+get_s2i(d::TupleAPDict) = d.d.s2i
 
 struct HillyAPDict{Ta} <: APDict{Ta}
     d::PlainAPDict{Ta}
@@ -185,6 +207,7 @@ Base.getindex(d::HillyAPDict,a) = d.d[a]
 (d::HillyAPDict)(v) = d.d(v)
 get_aut(d::HillyAPDict) = get_aut(d.d)
 get_factory(d::HillyAPDict) = d.factory
+get_s2i(d::HillyAPDict) = d.d.s2i
 
 Base.getindex(factory::APDictFactory{Ta},n::Integer) where Ta = TupleAPDict{n,Ta}(factory.d[n],factory)
 Base.getindex(factory::APDictFactory{Ta}) where Ta = HillyAPDict{Ta}(factory.d0,factory)
@@ -333,7 +356,10 @@ struct SpotAutomaton{Ta} <: BuchiAutomaton{Ta}
     x::CxxWrap.StdLib.SharedPtrAllocated{Spot.TWAGraph}
 end
 
-SpotAutomaton(w::SpotOmegaWord{Ta}) where Ta = SpotAutomaton{Ta}(w.d,Spot.as_automaton(w.x))
+function Base.copy(A::SpotAutomaton{Ta}) where Ta
+    SpotAutomaton{Ta}(A.d,Spot.copy(A.x))
+end
+
 states(A::SpotAutomaton) = 0:nstates(A)-1
 nstates(A::SpotAutomaton) = Int(Spot.num_states(A.x))
 ntransitions(A::SpotAutomaton) = Int(Spot.num_edges(A.x))
@@ -351,28 +377,34 @@ Create a new automaton over letters of type `Ta`. The arguments are:
 * `acc`, an optional acceptance condition (for now, `AcceptBuchi(n)` and `AcceptCoBuchi(n)` are allowed)
 * 
 """
+SpotAutomaton(w::SpotOmegaWord{Ta}) where Ta = SpotAutomaton{Ta}(w.d,Spot.as_automaton(w.x))
 function SpotAutomaton(d::APDict{Ta}) where Ta
     aut = Spot.make_twa_graph(bdd_dict(d))
     Spot.copy_ap_of(aut,get_aut(d))
     SpotAutomaton{Ta}(d,aut)
 end
 
-function SpotAutomaton(d::APDict,n::Integer,vs::Pair...)
+function SpotAutomaton(d::APDict,n::Integer,v::AbstractVector)
     A = SpotAutomaton(d)
     resize!(A,n)
-    for edge=vs
+    for edge=v
         push!(A,edge)
     end
     A
 end
 
-function SpotAutomaton(d::APDict,v::Pair,vs::Pair...)
+function SpotAutomaton(d::APDict,v::AbstractVector)
+    A = SpotAutomaton(d)
     n = 0
-    for (s,(_,t))=vs
+    for (s,(_,t))=v
         n = max(n,s,t)
     end
-    SpotAutomaton(d,n+1,v,vs...)
+    SpotAutomaton(d,n+1,v)
 end
+
+SpotAutomaton(d::APDict,n::Integer,vs::Pair...) = SpotAutomaton(d,n,vs)
+
+SpotAutomaton(d::APDict,v::Pair,vs::Pair...) = SpotAutomaton(d,[v;vs...])
 
 function SpotAutomaton(d::APDict,acc::AcceptBuchi,args...)
     aut = SpotAutomaton(d,args...)
@@ -449,12 +481,19 @@ function Base.push!(g::SpotAutomaton{Ta},edge::Pair{T,Pair{Tuple{Ta,U},T}}) wher
     g
 end
 
+#!!! fix initial states for creation -- gives buggy automata
+
+#!!! fix format for dictionaries, create on demand
+
 function Base.push!(g::SpotAutomaton{Ta},edge::Pair{T,Pair{Tuple{Ta,Vector{U}},T}}) where {Ta,T<:Integer,U<:Integer}
     cond = edge.second.first
     acc = convert(Vector{UInt32},cond[2])
     Spot.new_edge!(g.x,edge.first,edge.second.second,g.d[cond[1]],acc)
     g
 end
+
+# fallback
+Base.push!(g::SpotAutomaton{Ta},edge::Pair{T,Pair{X,T}}) where {Ta,X,T<:Integer} = push!(g,edge.first=>edge.second.first=>edge.second.second)
 
 function Base.append!(g::SpotAutomaton,edges)
     for e=edges push!(g,e) end
@@ -487,6 +526,12 @@ Split all edges of the automaton `A` into minimal Boolean expressions (maximal c
 """
 split_edges(g::SpotAutomaton) = SpotAutomaton(g.d,Spot.split_edges(g.x))
 
+"""sbacc(A::SpotAutomaton{Ta})
+
+Make the acceptance condition of `A` state-based.
+"""
+sbacc(g::SpotAutomaton) = SpotAutomaton(g.d,Spot.sbacc(g.x))
+
 """project(A::SpotOmegaWord,inds::Union{Int,Vector{Int}})
 project(A::SpotAutomaton,inds::Union{Int,Vector{Int}})
 
@@ -514,7 +559,7 @@ function __recoder_dict(A,m,inds,strip)
         result = UInt32[]
 
         for (t,v)=factory.d[m].s2i
-            u = reduce(&, factory.bdd[t[inds[i]],i] for i=1:n if inds[i]≠0)
+            u = reduce(&, (factory.bdd[t[inds[i]],i] for i=1:n if inds[i]≠0),init=Spot.bdd_true())
 
             iv = Spot.id(v)
             while length(result)≤iv push!(result,~UInt32(0)) end
@@ -562,18 +607,18 @@ const OL_FLAGS = Dict(:Low => Spot.OL_Low, :Medium => Spot.OL_Medium,
                       :High => Spot.OL_High)
 function postprocessor(; outputtype = nothing, preference = nothing, level = nothing)
     pp = Spot.PostProcessor()
-    outputtype≠nothing && Spot.set_type(pp,OT_FLAGS[outputtype])
+    isnothing(outputtype) || Spot.set_type(pp,OT_FLAGS[outputtype])
     if isa(preference,Nothing)
     elseif isa(preference,Integer)
         Spot.set_pref(pp,preference)
     elseif isa(preference,Symbol)
         Spot.set_pref(pp,OP_FLAGS[preference])
     elseif isa(preference,Vector{Symbol})
-        Spot.set_pref(pp,reduce(|,OP_FLAGS[v] for v=preference))
+        Spot.set_pref(pp,reduce(|,(OP_FLAGS[v] for v=preference),init=UInt32(0)))
     else
         error("Unknown preference $preference")
     end
-    level≠nothing && Spot.set_level(pp,OL_FLAGS[level])
+    isnothing(level) || Spot.set_level(pp,OL_FLAGS[level])
     pp
 end
 function (pp::Spot.PostProcessor)(A::SpotAutomaton)
@@ -646,18 +691,135 @@ function parse_hoa(str::AbstractString,dict::APDict{Ta} = APDict()) where Ta
     SpotAutomaton{Ta}(dict,A)
 end
 
-# todo: add support for aliases, to be built into dictionary
-function fileio_load(name::File,dict::APDict{Ta} = APDict()) where Ta
-    A = Spot.parse_hoa(filename(name),bdd_dict(dict))
-    isptrnull(A) && error("Could not parse automaton")
-    SpotAutomaton{Ta}(dict,A)
+function alias_pickle(s)
+    sv = UInt8[]
+    for c=Vector{UInt8}(s)
+        if UInt8('a')<=c<=UInt8('z') || UInt8('A')<=c<=UInt8('Z') || UInt8('0')<=c<=UInt8('9')
+            push!(sv,c)
+        else
+            push!(sv,'_')
+            push!(sv,'A'+(c>>4));
+            push!(sv,'A'+(c&0x0f));
+        end
+    end
+    String(sv)
 end
 
-function fileio_save(name::File,A::SpotAutomaton)
+function alias_unpickle(s)
+    sv = UInt8[]
+    mode = 0
+    temp = 0
+    for c=Vector{UInt8}(s)
+        if mode==0
+            if UInt8('a')<=c<=UInt8('z') || UInt8('A')<=c<=UInt8('Z') || UInt8('0')<=c<=UInt8('9')
+                push!(sv,c)
+            else
+                mode = 1
+            end
+        elseif mode==1
+            temp = c-UInt8('A')
+            mode = 2
+        else
+            temp = (temp<<4) | (c-UInt8('A'))
+            push!(sv,temp)
+            mode = 0
+        end
+    end
+    String(sv)
+end
+
+function get_aliases(A, pickled = true)
+    aliases = split(Spot.get_aliases(A),'@')
+    dict = Dict{String,Spot.BDD}()
+    for i=1:2:length(aliases)-1
+        name = pickled ? alias_unpickle(aliases[i]) : aliases[i]
+        dict[name] = Spot.bdd_from_int(parse(Int,aliases[i+1]))
+    end
+    dict
+end
+
+function set_aliases!(A, dict, pickled = true)
+    data = join((pickled ? alias_pickle(string(k)) : string(k))*'@'*string(Spot.id(v))*'@' for (k,v)=dict)
+    Spot.set_aliases!(A,data)
+end
+
+function fileio_load(name::File{DataFormat{:HOA}},dict0 = nothing, pickled = true)
+    dict = isnothing(dict0) ? APDict() : dict0
+    T = keytype(dict)
+
+    A = Spot.parse_hoa(filename(name),bdd_dict(dict))
+    isptrnull(A) && error("Could not parse automaton")
+
+    if isnothing(dict0)
+        alias_dict = get_aliases(A, pickled)
+        if !isempty(alias_dict)
+            dict = APDict(alias_dict)
+            T = String
+        end
+    end
+    SpotAutomaton{T}(dict,A)
+end
+
+function fileio_save(name::File{DataFormat{:HOA}},A::SpotAutomaton, pickled = true)
+    set_aliases!(A.x,get_s2i(A.d), pickled)
     Spot.save_hoa(filename(name),A.x)
 end
 
-print_hoa(g::SpotAutomaton) = print(Buchi.Spot.string_hoa(g.x))
+function fileio_load(name::File{DataFormat{:BA}},dict = nothing)
+    states, state_num, alphabet_num, alphabet, transitions, finals = parse_ba(open(name).io)
+
+    if isnothing(dict)
+        #!!! or make it a factory, if alphabet consists of tuples?
+        dict = APDict(alphabet)
+    end
+
+    A = SpotAutomaton(dict, length(states))
+
+    if isempty(finals) # when no final states, then everything is accepting
+        for t=transitions
+            push!(A,t[1]-1=>t[2]=>t[3]-1)
+        end
+    else
+        Spot.set_buchi!(A.x)
+        acc_states = falses(length(states))
+        for f=finals
+            acc_states[f] = true
+        end
+        for t=transitions
+            if acc_states[t[1]]
+                push!(A,t[1]-1=>(t[2],0)=>t[3]-1)
+            else
+                push!(A,t[1]-1=>t[2]=>t[3]-1)
+            end
+        end
+    end
+    
+    A
+end
+
+function fileio_save(name::File{DataFormat{:BA}},A::SpotAutomaton)
+    acc = Spot.acc(A.x)
+    Spot.is_buchi(acc) || Spot.is_t(acc) || error("unsupported acceptance condition")
+
+    A = split_edges(sbacc(A))
+
+    stream = open(name,"w")
+    write(stream,"[$(initial(A))]\n")
+    for (s,((a,_),t))=A[]
+        write(stream,ba_encode(a),",[$s]->[$t]\n")
+    end
+
+    for s=states(A)
+        if Spot.accepting(acc,Spot.state_acc_sets(A.x,s))
+            write(stream,"[$s]\n");
+        end
+    end
+    write(stream,"\n")
+    close(stream)
+end
+
+print_hoa(io::IO, g::SpotAutomaton) = print(io, Buchi.Spot.string_hoa(g.x))
+print_hoa(g::SpotAutomaton) = print(stdin, g)
 
 function Base.:(*)(A::SpotAutomaton{NTuple{N,Ta}},B::SpotAutomaton{Ta}) where {N,Ta}
     @assert get_factory(A.d) == get_factory(B.d)
@@ -694,7 +856,7 @@ Base.:(*)(w::SpotOmegaWord{Ta},A::SpotAutomaton{NTuple{N,Ta}}) where {N,Ta} = Sp
 function Base.:(*)(A::SpotAutomaton{NTuple{2,Ta}},w::SpotOmegaWord{Ta}) where Ta
     @assert get_factory(A.d) == get_factory(w.d)
     u = intersecting_word(A,project(SpotAutomaton(w),[0,1]))
-    u==nothing && error("Could not find word in product")
+    isnothing(u) && error("Could not find word in product")
     global uuuu
     uuuu = u
     project(u,1)
@@ -703,7 +865,7 @@ end
 function Base.:(*)(w::SpotOmegaWord{Ta},A::SpotAutomaton{NTuple{2,Ta}}) where Ta
     @assert get_factory(A.d) == get_factory(w.d)
     u = intersecting_word(project(SpotAutomaton(w),[1,0]),A)
-    u==nothing && error("Could not find word in product")
+    isnothing(u) && error("Could not find word in product")
     project(u,2)
 end
 
@@ -771,4 +933,66 @@ function top(A::SpotAutomaton{Ta},radius,root=initial(A)) where Ta
     result = Int[]
     __dfs_top(A,root,seen,result,radius)
     subautomaton(A,result)
+end
+
+function learn(dict::APDict; ismember::Function, isequal::Function)
+    alphabet = keys(dict) |> collect
+    alphabet_lookup = Dict(k=>m for (m,k)=enumerate(alphabet))
+    aut = nothing
+    
+    pin = Pipe()
+    pout = Pipe()
+    java = haskey(ENV,"JAVA_RUNTIME") ? ENV["JAVA_RUNTIME"] : "/opt/homebrew/bin/java"
+    cmd = `$java -Xmx128M -jar $(@__DIR__)/../deps/roll-library/ROLL.jar julia`
+    proc = run(pipeline(cmd, stdin = pin, stdout = pout), wait = false)
+    process_running(proc) || error("could not start java")
+    @assert readline(pout) == "ALPHABET_SIZE"
+    println(pin,length(dict))
+    while true
+        # process data
+        @assert process_running(proc)
+        s = split(readline(pout))
+        if s[1]=="OMEGAWORD_QUERY"
+            prefix = (s[2]=="ϵ" ? keytype(dict)[] : [alphabet[c+1-'a'] for c=s[2]])
+            suffix = [alphabet[c+1-'a'] for c=s[3]]
+            w = SpotOmegaWord(dict,prefix,suffix)
+            @info "Testing membership of $w"
+            member = ismember(w)
+            @assert isa(member,Bool)
+            println(pin,"$(Int(member))")
+        elseif s[1]=="AUTOMATON"
+            states, _, alphabet_num, _, transitions, finals = parse_ba(pout)
+            acc_states = falses(length(states))
+            for f=finals
+                acc_states[f] = true
+            end
+            aut = SpotAutomaton(dict,AcceptBuchi(),[(b = alphabet[alphabet_num[a]]; s-1=>(acc_states[s] ? (b,0) : b)=>t-1) for (s,a,t)=transitions])
+
+            @assert readline(pout)=="TEST_EQUAL"
+            @info "Testing equality of $aut"
+            equal = isequal(aut)
+            if equal==true
+                println(pin,"1")
+            else
+                println(pin,"0")
+                @assert isa(equal,SpotOmegaWord)
+                preperiod, period = __get_preperiod_period(w)
+                @assert readline(pout)=="COUNTEREXAMPLE_STEM"
+                if isempty(preperiod)
+                    println(pin,"ϵ")
+                else
+                    println(pin,join('a'-1+alphabet_lookup[dict(Spot.bdd_from_int(i))] for i=preperiod))
+                end
+                @assert readline(pout)=="COUNTEREXAMPLE_LOOP"
+                println(pin,join('a'-1+alphabet_lookup[dict(Spot.bdd_from_int(i))] for i=period))
+            end
+        elseif s[1]=="BYE"
+            break
+        else
+            error("unknown command $s")
+        end
+    end
+    close(pout.in)
+    close(pin.out)
+    aut
 end

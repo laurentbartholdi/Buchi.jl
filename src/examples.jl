@@ -200,3 +200,42 @@ function thuemorse_spot()
     
     (factory = factory, id, increment, action, binadder, int2word)
 end
+
+function substitutive(ϕ::Dict{Char,String})
+    Σ₀ = keys(ϕ) |> collect |> sort
+    N = length(Σ₀)
+    alphabet = Dict{Any,Int}(c=>n for (n,c)=enumerate(Σ₀))
+    for (m,c)=enumerate(Σ₀), (n,d)=enumerate(Σ₀)
+        alphabet[c,d] = m*N+n
+    end
+    Σ = [Symbol(c,'𝟎'+i) for c=Σ₀ for i=0:length(ϕ[c])-1]
+
+    factory = APDictFactory(3,Σ)
+    id = let trans = Pair{Int,Pair{Symbol,Int}}[]
+        for c=Σ₀, i=0:length(ϕ[c])-1
+            d = collect(ϕ[c])[i+1]
+            push!(trans,alphabet[d]=>Symbol(c,'𝟎'+i)=>alphabet[c])
+            push!(trans,0=>Symbol(c,'𝟎'+i)=>alphabet[c])
+        end
+        SpotAutomaton(factory[], N+1, trans)
+    end
+
+    increment = let trans = Pair{Int,Pair{NTuple{2,Symbol},Int}}[]
+        for c=Σ₀, i=0:length(ϕ[c])-1
+            d = collect(ϕ[c])[i+1]
+            push!(trans,alphabet[d]=>(Symbol(c,'𝟎'+i),Symbol(c,'𝟎'+i))=>alphabet[c])
+        end
+        for c=Σ₀, i=0:length(ϕ[c])-2
+            d₀ = collect(ϕ[c])[i+1]
+            d₁ = collect(ϕ[c])[i+2]
+            push!(trans,alphabet[d₀,d₁]=>(Symbol(c,'𝟎'+i),Symbol(c,'𝟎'+i+1))=>alphabet[c])
+        end
+        for c₀=Σ₀, c₁=Σ₀
+            d₀ = collect(ϕ[c₀])[end]
+            d₁ = collect(ϕ[c₁])[1]
+            push!(trans,alphabet[d₀,d₁]=>(Symbol(c₀,'𝟎'+length(ϕ[c])-1),Symbol(c₁,'𝟎'))=>alphabet[c₀,c₁])
+            push!(trans,0=>(Symbol(c₀,'𝟎'+length(ϕ[c])-1),Symbol(c₁,'𝟎'))=>alphabet[c₀,c₁])
+        end
+    end
+    (factory = factory, Σ₀, Σ, id, increment)
+end
