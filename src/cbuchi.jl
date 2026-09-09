@@ -1,5 +1,3 @@
-#!!! fix initial states for creation -- gives buggy automata
-
 """CBuchiAutomaton{Ti,A}
 
 The class of closed, deterministic Büchi automata.
@@ -19,9 +17,16 @@ struct CBuchiAutomaton{Ti,Ta} <: BuchiAutomaton{Ta}
         if isa(initial,Int) && initial≠1 # swap 1 and initial
             data = ((s==initial ? 1 : s==1 ? initial : s)=>a=>(t==initial ? 1 : t==1 ? initial : t) for (s,(a,t))=data)
         elseif isa(initial,AbstractVector)
+            newdata = collect(data)
+            for (s,(a,t))=newdata
+                n = max(n,s,t)
+            end
             n += 1
             # move 1 out of the way
-            newdata = [(s==1 ? n : s)=>a=>(t==1 ? n : t) for (s,(a,t))=data]
+            for i=1:length(newdata)
+                s,(a,t) = newdata[i]
+                newdata[i] = (s==1 ? n : s)=>a=>(t==1 ? n : t)
+            end
             # and add transitions from 1 to all initial
             for i=initial, (s,(a,t))=data
                 i==s && push!(newdata,1=>a=>(t==1 ? n : t))

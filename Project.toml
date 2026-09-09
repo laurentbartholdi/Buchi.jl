@@ -15,7 +15,7 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
 CxxWrap = "0.7 - 0.27.1"
-DataStructures = "0.18"
+DataStructures = "0.18 - 0.99"
 FileIO = "1"
 GraphViz = "0.2"
 SimpleTraits = "0.9"

@@ -219,6 +219,8 @@ end
 Base.size(v::OmegaWord) = (length(v.preperiod),length(v.period))
 Base.size(v::AbstractPeriodicVector,i) = (1≤i≤2 ? size(v)[1] : 1)
 
+Base.lastindex(v::OmegaWord) = ω
+
 function Base.show(io::IO, ::MIME"text/plain", w::OmegaWord)
     for a=w.preperiod
         print(io, letterstring(a))

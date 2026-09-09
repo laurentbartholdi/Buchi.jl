@@ -371,6 +371,8 @@ function acceptance_string(A::SpotAutomaton)
     Spot.name(Spot.acc(A.x),"d")*" ≐ "*Spot.to_text(Spot.get_acceptance(A.x))
 end
 
+set_init_state!(A::SpotAutomaton,i) = Spot.set_init_state!(A.x,i)
+
 """SpotAutomaton(w::SpotOmegaWord)
 SpotAutomaton(d::APDict,[acc::Union{AcceptBuchi,AcceptCoBuchi}],[n::Integer],vs::Pair...)
 
@@ -386,36 +388,47 @@ function SpotAutomaton(d::APDict{Ta}) where Ta
     SpotAutomaton{Ta}(d,aut)
 end
 
-function SpotAutomaton(d::APDict,n::Integer,v::AbstractVector)
+function SpotAutomaton(d::APDict,n::Integer,v::AbstractVector; initial=nothing)
     A = SpotAutomaton(d)
     resize!(A,n)
     for edge=v
         push!(A,edge)
     end
+    if isa(initial,Int)
+        set_init_state!(A,initial)
+    elseif isa(initial,AbstractVector{Int})
+        n = Spot.new_state!(A.x)
+        set_init_state!(A,n)
+        new_edges = [n=>a=>t for s=initial for (a,t)=A[s]]
+        append!(A,new_edges)
+    elseif !isa(initial,Nothing)
+        error("unknown kind of initial object $initial")
+    end
+    
     A
 end
 
-function SpotAutomaton(d::APDict,v::AbstractVector)
+function SpotAutomaton(d::APDict,v::AbstractVector; kwargs...)
     A = SpotAutomaton(d)
     n = 0
     for (s,(_,t))=v
         n = max(n,s,t)
     end
-    SpotAutomaton(d,n+1,v)
+    SpotAutomaton(d,n+1,v; kwargs...)
 end
 
-SpotAutomaton(d::APDict,n::Integer,vs::Pair...) = SpotAutomaton(d,n,vs)
+SpotAutomaton(d::APDict,n::Integer,vs::Pair...; kwargs...) = SpotAutomaton(d,n,vs; kwargs...)
 
-SpotAutomaton(d::APDict,v::Pair,vs::Pair...) = SpotAutomaton(d,[v;vs...])
+SpotAutomaton(d::APDict,v::Pair,vs::Pair...; kwargs...) = SpotAutomaton(d,[v;vs...]; kwargs...)
 
-function SpotAutomaton(d::APDict,acc::AcceptBuchi,args...)
-    aut = SpotAutomaton(d,args...)
+function SpotAutomaton(d::APDict,acc::AcceptBuchi,args...; kwargs...)
+    aut = SpotAutomaton(d,args...; kwargs...)
     Spot.set_generalized_buchi!(aut.x,acc.n)
     aut
 end
 
-function SpotAutomaton(d::APDict,acc::AcceptCoBuchi,args...)
-    aut = SpotAutomaton(d,args...)
+function SpotAutomaton(d::APDict,acc::AcceptCoBuchi,args...; kwargs...)
+    aut = SpotAutomaton(d,args...; kwargs...)
     Spot.set_generalized_co_buchi!(aut.x,acc.n)
     aut
 end
@@ -483,14 +496,14 @@ function Base.push!(g::SpotAutomaton{Ta},edge::Pair{T,Pair{Tuple{Ta,U},T}}) wher
     g
 end
 
-function Base.push!(g::SpotAutomaton{Ta},edge::Pair{T,Pair{Tuple{Ta,Vector{U}},T}}) where {Ta,T<:Integer,U<:Integer}
+function Base.push!(g::SpotAutomaton{Ta},edge::Pair{T,Pair{Tuple{Ta,X},T}}) where {Ta,T<:Integer,X} # X is typically a vector of acceptance rules
     cond = edge.second.first
     acc = convert(Vector{UInt32},cond[2])
     Spot.new_edge!(g.x,edge.first,edge.second.second,g.d[cond[1]],acc)
     g
 end
-
-# fallback
+       
+# fallback, retype objects
 Base.push!(g::SpotAutomaton{Ta},edge::Pair{T,Pair{X,T}}) where {Ta,X,T<:Integer} = push!(g,edge.first=>edge.second.first=>edge.second.second)
 
 function Base.append!(g::SpotAutomaton,edges)
@@ -522,7 +535,7 @@ rawautomaton(g::SpotAutomaton) = SpotAutomaton(APDict(get_aut(g.d)),g.x)
 
 Split all edges of the automaton `A` into minimal Boolean expressions (maximal conjunctions of atomic propositions), so they correspond to letters in `Ta`.
 """
-split_edges(g::SpotAutomaton) = SpotAutomaton(g.d,Spot.split_edges(g.x))
+split_edges(g::SpotAutomaton) = nstates(g)==0 ? g : SpotAutomaton(g.d,Spot.split_edges(g.x))
 
 """sbacc(A::SpotAutomaton{Ta})
 
@@ -855,8 +868,6 @@ function Base.:(*)(A::SpotAutomaton{NTuple{2,Ta}},w::SpotOmegaWord{Ta}) where Ta
     @assert get_factory(A.d) == get_factory(w.d)
     u = intersecting_word(A,project(SpotAutomaton(w),[0,1]))
     isnothing(u) && error("Could not find word in product")
-    global uuuu
-    uuuu = u
     project(u,1)
 end
 
